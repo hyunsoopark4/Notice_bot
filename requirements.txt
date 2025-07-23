@@ -1,0 +1,3 @@
+requests
+beautifulsoup4
+# selenium 쓰면 여기에 selenium도 추가
