@@ -39,3 +39,4 @@ jobs:
             git add last_notice_id.txt
             git commit -m "update notice id"
             git push https://$GH_PAT@github.com/${{ github.repository }} HEAD:${{ github.ref }}
+          fi
