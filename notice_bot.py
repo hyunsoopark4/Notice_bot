@@ -32,6 +32,14 @@ def get_latest_notice():
     공지사항 목록 페이지에서 가장 최신 글의 ID‧제목‧링크를 추출한다.
     사이트 구조가 바뀌면 CSS 선택자를 수정해야 한다.
     """
+    resp = requests.get(NOTICE_URL, timeout=10, allow_redirects=True)
+    print("DEBUG status_code:", resp.status_code)
+    print("DEBUG final_url   :", resp.url[:100])   # 리다이렉트 여부 확인
+
+    # ↓ 실패 로그가 계속 나오면 HTML 일부를 파일로 남겨 Actions 아티팩트로 확인
+    with open("debug.html", "w", encoding="utf-8") as f:
+        f.write(resp.text[:2000])          # 앞부분만 저장
+        
     resp = requests.get(NOTICE_URL, timeout=10)
     resp.raise_for_status()
 
