@@ -5,6 +5,10 @@ on:
     - cron: "0 * * * *"
   workflow_dispatch: {}   # 수동 실행도 가능
 
+# ── ① GITHUB_TOKEN에 쓰기 권한 부여 ── ⬅️ 추가
+permissions:
+  contents: write         # 필수! push 하려면 write 권한이 있어야 함
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -22,21 +26,20 @@ jobs:
           python-version: "3.x"
 
       - name: Install deps
-        run: pip install requests beautifulsoup4 selenium
+        run: pip install requests beautifulsoup4   # selenium 안 쓰면 삭제
 
       - name: Run bot
         run: python notice_bot.py
 
+      # ── ② PAT 대신 GITHUB_TOKEN 사용 ── ⬅️ GH_PAT 관련 줄 삭제
       - name: Commit last_notice_id if changed
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}   # repo-scoped Personal Access Token
         run: |
-          git config user.name "notice-bot"
-          git config user.email "bot@users.noreply.github.com"
-          if git diff --quiet; then
-            echo "no change"
+          git config --global user.name  "notice-bot"
+          git config --global user.email "bot@users.noreply.github.com"
+          if git diff --quiet last_notice_id.txt; then
+            echo "no update"
           else
             git add last_notice_id.txt
             git commit -m "update notice id"
-            git push https://$GH_PAT@github.com/${{ github.repository }} HEAD:${{ github.ref }}
+            git push          # 토큰 자동 주입
           fi
