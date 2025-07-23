@@ -1,0 +1,41 @@
+name: notice-bot
+
+on:
+  schedule:               # 매 시 정각 실행 (UTC)
+    - cron: "0 * * * *"
+  workflow_dispatch: {}   # 수동 실행도 가능
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install deps
+        run: pip install requests beautifulsoup4 selenium
+
+      - name: Run bot
+        run: python notice_bot.py
+
+      - name: Commit last_notice_id if changed
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}   # repo-scoped Personal Access Token
+        run: |
+          git config user.name "notice-bot"
+          git config user.email "bot@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "no change"
+          else
+            git add last_notice_id.txt
+            git commit -m "update notice id"
+            git push https://$GH_PAT@github.com/${{ github.repository }} HEAD:${{ github.ref }}
