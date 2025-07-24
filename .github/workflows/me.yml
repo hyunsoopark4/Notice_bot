@@ -1,0 +1,41 @@
+name: me-bot
+
+on:
+  schedule:
+    # KST 07~23시 매 시 정각 (UTC 0–14, 22–23)
+    - cron: "0 0-14,22-23 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK_ME: ${{ secrets.DISCORD_WEBHOOK_ME }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install deps
+        run: pip install requests beautifulsoup4
+
+      - name: Run me_bot
+        run: python me_bot.py
+
+      - name: Commit last_me_id if changed
+        run: |
+          git config --global user.name  "me-bot"
+          git config --global user.email "bot@users.noreply.github.com"
+          if git diff --quiet last_me_id.txt; then
+            echo "no update"
+          else
+            git add last_me_id.txt
+            git commit -m "update me notice id"
+            git push
+          fi
