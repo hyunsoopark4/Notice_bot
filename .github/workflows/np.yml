@@ -1,8 +1,9 @@
-name: np-bot        # 비교과 프로그램 알림
+name: np-bot
 
 on:
   schedule:
-    - cron: "15 * * * *"   # 매 시 15분(UTC) → KST 0, 1, 2 … :15
+    # 매 시 정각, UTC 0~14 & 22~23 → KST 07~23
+    - cron: "0 0-14,22-23 * * *"
   workflow_dispatch: {}
 
 permissions:
