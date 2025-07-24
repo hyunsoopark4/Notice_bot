@@ -1,0 +1,42 @@
+name: np-bot        # 비교과 프로그램 알림
+
+on:
+  schedule:
+    - cron: "15 * * * *"   # 매 시 15분(UTC) → KST 0, 1, 2 … :15
+  workflow_dispatch: {}
+
+permissions:
+  contents: write          # last_np_id 커밋 push용
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK_NP: ${{ secrets.DISCORD_WEBHOOK_NP }}
+      SSU_ID: ${{ secrets.SSU_ID }}
+      SSU_PW: ${{ secrets.SSU_PW }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run np_bot
+        run: python np_bot.py
+
+      - name: Commit last_np_id if changed
+        run: |
+          git config --global user.name  "np-bot"
+          git config --global user.email "bot@users.noreply.github.com"
+          if git diff --quiet last_np_id.txt; then
+            echo "no update"
+          else
+            git add last_np_id.txt
+            git commit -m "update np id"
+            git push
+          fi
