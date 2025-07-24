@@ -1,28 +1,33 @@
-# me_bot.py  (타임아웃·재시도·헤더 보강)
+# me_bot.py  (국내 무료 프록시로 GitHub Actions 타임아웃 해결판)
+
 import os, re, sys, time, requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 
-WEBHOOK  = os.getenv("DISCORD_WEBHOOK_ME")
+WEBHOOK  = os.getenv("DISCORD_WEBHOOK_ME")              # 디스코드 웹훅 시크릿
 LIST_URL = "https://me.ssu.ac.kr/notice/notice01.php"
 ID_FILE  = "last_me_id.txt"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:124.0) Gecko/20100101 Firefox/124.0"
 }
-TIMEOUT = 20          # 초 ― 10초 → 20초
-RETRY   = 3           # 최대 재시도 횟수
+
+TIMEOUT      = 20   # 초
+RETRY        = 3    # 재시도 횟수
+KOREA_PROXY  = os.getenv("KOREA_PROXY") or "http://43.201.36.210:3128"  # 국내 프록시
 
 def parse_date(txt: str) -> datetime:
     txt = txt.strip().replace(".", "-")
     return datetime.strptime(txt, "%Y-%m-%d")
 
 def safe_get(url):
-    for i in range(RETRY):
+    proxy_dict = {"http": KOREA_PROXY, "https": KOREA_PROXY}
+    for i in range(1, RETRY + 1):
         try:
-            return requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+            return requests.get(url, headers=HEADERS,
+                                timeout=TIMEOUT, proxies=proxy_dict)
         except requests.exceptions.RequestException as e:
-            print(f"⚠️  연결 실패({i+1}/{RETRY})… {e}")
+            print(f"⚠️  연결 실패({i}/{RETRY}) – {e}")
             time.sleep(2)
     return None
 
@@ -32,7 +37,7 @@ def get_latest():
         return None, None, None
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    latest_a, latest_dt = None, datetime.min
+    latest_link, latest_dt = None, datetime.min
 
     for tr in soup.select("tr"):
         date_td = tr.find("td", string=re.compile(r"\d{4}.\d{2}.\d{2}"))
@@ -44,24 +49,27 @@ def get_latest():
         except ValueError:
             continue
         if cur_dt >= latest_dt:
-            latest_dt, latest_a = cur_dt, link_a
+            latest_dt, latest_link = cur_dt, link_a
 
-    if not latest_a:
+    if not latest_link:
         return None, None, None
 
-    link = latest_a["href"]
+    link = latest_link["href"]
     if link.startswith("/"):
         link = "https://me.ssu.ac.kr" + link
-    title = latest_a.get_text(strip=True)
+    title = latest_link.get_text(strip=True)
     wr_id = re.search(r"wr_id=(\d+)", link).group(1)
     return wr_id, title, link
 
 def read_last():
-    try: return open(ID_FILE).read().strip()
-    except FileNotFoundError: return None
+    try:
+        return open(ID_FILE).read().strip()
+    except FileNotFoundError:
+        return None
 
 def write_last(wid):
-    with open(ID_FILE, "w") as f: f.write(wid)
+    with open(ID_FILE, "w") as f:
+        f.write(wid)
 
 def send(msg):
     requests.post(WEBHOOK, json={"content": msg}, timeout=10)
