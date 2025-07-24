@@ -11,8 +11,17 @@ TIMEOUT  = 20
 
 md5 = lambda s: hashlib.md5(s.encode()).hexdigest()
 
+DEBUG_SAVE_HTML = True 
+
 def get_latest():
     html = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT).text
+
+     # ── 디버그용: 파싱 실패할 때 HTML 저장 ──
+    if DEBUG_SAVE_HTML:
+        with open("mse_debug.html", "w", encoding="utf-8") as f:
+            f.write(html[:20000])   # 2만 byte면 목록 전체 충분
+        print("🔍 mse_debug.html 로 HTML 저장 완료")
+
     soup = BeautifulSoup(html, "html.parser")
 
     for tr in soup.select("tbody tr"):
