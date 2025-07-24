@@ -1,19 +1,20 @@
-# materials_bot.py  – board_list 테이블 전용 확정판
+# materials_bot.py  –  링크 기반 가장 탄탄한 버전
 import os, re, sys, hashlib, requests, traceback
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-WEBHOOK  = os.getenv("DISCORD_WEBHOOK_MSE")          # 레포 Secrets
+WEBHOOK  = os.getenv("DISCORD_WEBHOOK_MSE")            # <- Secrets
 LIST_URL = "https://materials.ssu.ac.kr/bbs/board.php?tbl=bbs51"
 ID_FILE  = "last_mse_id.txt"
 HEADERS  = {"User-Agent": "Mozilla/5.0"}
-TIMEOUT  = 20
-md5 = lambda s: hashlib.md5(s.encode()).hexdigest()
+TIMEOUT  = 15
+md5      = lambda s: hashlib.md5(s.encode()).hexdigest()
 
 def smart_decode(b: bytes) -> str:
     for enc in ("utf-8", "cp949", "euc-kr"):
         try: return b.decode(enc)
-        except UnicodeDecodeError: pass
+        except UnicodeDecodeError:
+            continue
     return b.decode("utf-8", "replace")
 
 def fetch_html() -> str | None:
@@ -23,30 +24,39 @@ def fetch_html() -> str | None:
     except Exception:
         traceback.print_exc(); return None
 
+def is_notice(tag) -> bool:
+    """링크 자신 또는 주변에 '공지' 글자가 들어 있으면 고정 공지로 간주"""
+    if "공지" in tag.get_text():                       # 자체 텍스트
+        return True
+    # 앞뒤 형제/부모 td, div 등에 '공지' 포함 여부
+    for sib in list(tag.parents)[:2] + list(tag.previous_siblings)[:2]:
+        if hasattr(sib, "get_text") and "공지" in sib.get_text():
+            return True
+    return False
+
 def get_latest():
     html = fetch_html()
-    if not html: return None, None, None
-    soup = BeautifulSoup(html, "html.parser")
-
-    table = soup.find("table", class_="board_list")
-    if not table:
+    if not html:
         return None, None, None
 
-    for tr in table.select("tbody tr"):
-        tds = tr.find_all("td")
-        if len(tds) < 3: continue
+    soup = BeautifulSoup(html, "html.parser")
 
-        # 첫 번째 셀에 '공지'가 있으면 고정글 → 건너뛰기
-        if "공지" in tds[0].get_text():
-            continue
+    # 링크 후보: href 안에 'tbl=bbs51'과 'num='(또는 idx=) 가 동시에 존재
+    link_candidates = soup.find_all(
+        "a",
+        href=lambda h: h and "tbl=bbs51" in h and re.search(r"(num|idx)=", h),
+    )
 
-        a = tds[1].find("a", href=True)
-        if not a: continue
+    for a in link_candidates:
+        if is_notice(a):
+            continue  # 고정 공지 skip
 
-        title = a.get_text(" ", strip=True)
         link  = urljoin("https://materials.ssu.ac.kr", a["href"])
+        title = a.get_text(" ", strip=True)
+
         m = re.search(r"(num|idx)=(\d+)", link)
-        nid = m.group(2) if m else md5(link)
+        nid = m.group(2) if m else md5(link)           # 글 고유 ID
+
         return nid, title, link
 
     return None, None, None
@@ -65,12 +75,15 @@ def main():
 
     nid, title, link = get_latest()
     if not nid:
-        print("🚫 파싱 실패 – 구조가 달라졌는지 확인 필요"); return
+        print("🚫 글 링크를 찾지 못했습니다 – 구조가 크게 바뀌었는지 확인 필요")
+        return
     if nid == read_last():
-        print("⏸ 새 글 없음"); return
+        print("⏸ 새 글 없음")
+        return
 
     send(f"🔬 **신소재공학과 새 공지**\n{title}\n{link}")
-    write_last(nid); print("✅ 새 공지 전송 완료")
+    write_last(nid)
+    print("✅ 새 공지 전송 완료")
 
 if __name__ == "__main__":
     main()
