@@ -1,5 +1,5 @@
-# materials_bot.py  –  다중 인코딩 자동 판별판
-import os, re, sys, hashlib, requests, traceback
+# materials_bot.py – 번호·날짜 제거, 순수 제목만 전송
+import os, re, sys, hashlib, requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
@@ -10,56 +10,47 @@ HEADERS  = {"User-Agent": "Mozilla/5.0"}
 TIMEOUT  = 15
 md5 = lambda s: hashlib.md5(s.encode()).hexdigest()
 
-def smart_decode(b: bytes) -> str:
-    """UTF-8 → CP949 순으로 시도해 첫 성공 인코딩 사용"""
+def smart_decode(b):
     for enc in ("utf-8", "cp949", "euc-kr"):
-        try:
-            return b.decode(enc)
-        except UnicodeDecodeError:
-            continue
-    # 모두 실패 시 손실 복구
+        try: return b.decode(enc)
+        except UnicodeDecodeError: continue
     return b.decode("utf-8", "replace")
 
-def fetch_html() -> str | None:
-    try:
-        r = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT)
-        return smart_decode(r.content)
-    except Exception:
-        traceback.print_exc()
-        return None
+def fetch_html():
+    r = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT)
+    return smart_decode(r.content)
 
 def get_latest():
-    html = fetch_html()
-    if not html:
-        return None, None, None
+    soup = BeautifulSoup(fetch_html(), "html.parser")
 
-    soup = BeautifulSoup(html, "html.parser")
-
-    # 글 목록 <tbody><tr> or <ul><li>
-    for a in soup.find_all("a", href=True):
-        href, text = a["href"], a.get_text(strip=True)
-
-        # 고정 공지(공지 텍스트·아이콘) 건너뛰기
-        if "공지" in text or a.find("img", alt=lambda v: v and "공지" in v):
-            continue
-        if not re.search(r"(view|num|idx)=", href):
+    for tr in soup.select("tbody tr"):
+        tds = tr.find_all("td")
+        if len(tds) < 3:
             continue
 
-        link = urljoin("https://materials.ssu.ac.kr", href)
+        # 고정 공지(첫번째 td 텍스트 '공지') 건너뛰기
+        if "공지" in tds[0].get_text():
+            continue
+
+        title_cell = tds[1]                     # 제목 셀
+        a = title_cell.find("a", href=True)
+        if not a:
+            continue
+
+        title = a.get_text(" ", strip=True)     # 순수 제목
+        link  = urljoin("https://materials.ssu.ac.kr", a["href"])
         m = re.search(r"(num|idx)=(\d+)", link)
         nid = m.group(2) if m else md5(link)
-        return nid, text, link
-
+        return nid, title, link
     return None, None, None
 
 def read_last():
     try: return open(ID_FILE).read().strip()
     except FileNotFoundError: return None
 
-def write_last(nid): open(ID_FILE, "w").write(nid)
+def write_last(n): open(ID_FILE, "w").write(n)
 
-def send(msg):
-    requests.post(WEBHOOK, json={"content": msg}, timeout=10)
+def send(msg): requests.post(WEBHOOK, json={"content": msg}, timeout=10)
 
 def main():
     if not WEBHOOK:
