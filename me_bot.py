@@ -1,42 +1,58 @@
-# me_bot.py  (국내 무료 프록시로 GitHub Actions 타임아웃 해결판)
-
-import os, re, sys, time, requests
+# me_bot.py  ── 한국 프록시 다중 시도 버전
+import os, re, sys, time, random, requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 
-WEBHOOK  = os.getenv("DISCORD_WEBHOOK_ME")              # 디스코드 웹훅 시크릿
+WEBHOOK  = os.getenv("DISCORD_WEBHOOK_ME")
 LIST_URL = "https://me.ssu.ac.kr/notice/notice01.php"
 ID_FILE  = "last_me_id.txt"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:124.0) Gecko/20100101 Firefox/124.0"
 }
+TIMEOUT = 15        # 프록시 품질 고려해 15초
+TRIES   = 2         # 프록시별 재시도 2회
 
-TIMEOUT      = 20   # 초
-RETRY        = 3    # 재시도 횟수
-KOREA_PROXY  = os.getenv("KOREA_PROXY") or "http://43.201.36.210:3128"  # 국내 프록시
+# ⚠️ 무료 공개 한국 프록시 샘플(2025-07 갱신) 8개
+PROXIES = [
+    "http://146.56.43.43:3128",
+    "http://146.56.43.1:80",
+    "http://61.100.180.198:8080",
+    "http://121.138.83.94:3128",
+    "http://58.180.224.188:80",
+    "http://210.179.83.199:3128",
+    "http://58.230.28.92:80",
+    "http://152.70.252.193:3128",
+]
 
 def parse_date(txt: str) -> datetime:
-    txt = txt.strip().replace(".", "-")
-    return datetime.strptime(txt, "%Y-%m-%d")
+    return datetime.strptime(txt.strip().replace(".", "-"), "%Y-%m-%d")
 
-def safe_get(url):
-    proxy_dict = {"http": KOREA_PROXY, "https": KOREA_PROXY}
-    for i in range(1, RETRY + 1):
-        try:
-            return requests.get(url, headers=HEADERS,
-                                timeout=TIMEOUT, proxies=proxy_dict)
-        except requests.exceptions.RequestException as e:
-            print(f"⚠️  연결 실패({i}/{RETRY}) – {e}")
-            time.sleep(2)
+def fetch_html():
+    random.shuffle(PROXIES)  # 매 실행마다 순서 섞기
+    for px in PROXIES:
+        for attempt in range(1, TRIES + 1):
+            try:
+                r = requests.get(
+                    LIST_URL,
+                    headers=HEADERS,
+                    timeout=TIMEOUT,
+                    proxies={"http": px, "https": px},
+                )
+                if r.status_code == 200 and "<html" in r.text.lower():
+                    print(f"✅  프록시 {px} 성공")
+                    return r.text
+            except requests.exceptions.RequestException as e:
+                print(f"⚠️  {px} 실패({attempt}/{TRIES}) – {e}")
+        print(f"🛑  {px} 포기, 다음 프록시로…")
     return None
 
 def get_latest():
-    resp = safe_get(LIST_URL)
-    if not resp or resp.status_code != 200:
+    html = fetch_html()
+    if not html:
         return None, None, None
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
     latest_link, latest_dt = None, datetime.min
 
     for tr in soup.select("tr"):
@@ -51,15 +67,14 @@ def get_latest():
         if cur_dt >= latest_dt:
             latest_dt, latest_link = cur_dt, link_a
 
-    if not latest_link:
-        return None, None, None
-
-    link = latest_link["href"]
-    if link.startswith("/"):
-        link = "https://me.ssu.ac.kr" + link
-    title = latest_link.get_text(strip=True)
-    wr_id = re.search(r"wr_id=(\d+)", link).group(1)
-    return wr_id, title, link
+    if latest_link:
+        link = latest_link["href"]
+        if link.startswith("/"):
+            link = "https://me.ssu.ac.kr" + link
+        title = latest_link.get_text(strip=True)
+        wid = re.search(r"wr_id=(\d+)", link).group(1)
+        return wid, title, link
+    return None, None, None
 
 def read_last():
     try:
@@ -80,7 +95,7 @@ def main():
 
     wid, title, link = get_latest()
     if not wid:
-        print("🚫 사이트 접속 실패 또는 글 파싱 실패 – 이번 실행 스킵")
+        print("🚫 모든 프록시 실패 – 이번 주기 스킵")
         return
 
     if wid == read_last():
