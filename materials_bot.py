@@ -21,8 +21,16 @@ def fetch_html():
     return smart_decode(r.content)
 
 def get_latest():
+    html = fetch_html()
+    if not html:
+        return None, None, None
     soup = BeautifulSoup(fetch_html(), "html.parser")
 
+    # ── 디버그용: 실패 시 첫 500 글자 출력 ──
+    print("DEBUG snippet ↓↓↓")
+    print(html[:500])
+    print("DEBUG snippet ↑↑↑")
+    
     for tr in soup.select("tbody tr"):
         tds = tr.find_all("td")
         if len(tds) < 3:
