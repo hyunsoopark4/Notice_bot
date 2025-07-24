@@ -1,14 +1,14 @@
-# materials_bot.py  –  num / idx 값만으로 링크 추출 (최종)
+# materials_bot.py  –  subject 셀만 대상으로 고정 공지 정확 필터
 import os, re, sys, hashlib, requests, traceback
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-WEBHOOK  = os.getenv("DISCORD_WEBHOOK_MSE")              # Secrets
+WEBHOOK  = os.getenv("DISCORD_WEBHOOK_MSE")               # ← Secrets
 LIST_URL = "https://materials.ssu.ac.kr/bbs/board.php?tbl=bbs51"
 ID_FILE  = "last_mse_id.txt"
 HEADERS  = {"User-Agent": "Mozilla/5.0"}
 TIMEOUT  = 15
-md5      = lambda s: hashlib.md5(s.encode()).hexdigest()
+md5 = lambda s: hashlib.md5(s.encode()).hexdigest()
 
 def smart_decode(b: bytes) -> str:
     for enc in ("utf-8", "cp949", "euc-kr"):
@@ -23,25 +23,23 @@ def fetch_html() -> str | None:
     except Exception:
         traceback.print_exc(); return None
 
-def is_notice(tag) -> bool:
-    if "공지" in tag.get_text():                  # 링크 자체
-        return True
-    for sib in tag.parents:                       # 부모 td/tr
-        if hasattr(sib, "get_text") and "공지" in sib.get_text():
-            return True
-    return False
-
 def get_latest():
     html = fetch_html()
     if not html: return None, None, None
     soup = BeautifulSoup(html, "html.parser")
 
-    for a in soup.find_all("a", href=lambda h: h and re.search(r"[?&](num|idx)=", h, re.I)):
-        if is_notice(a):
+    # 제목 셀(td) 클래스가 subject / subj 로 되어 있음
+    for td in soup.select("td.subject, td.subj"):
+        # 고정 공지(tr 안에 '공지' 텍스트가 별도 셀로 존재)
+        parent_tr = td.find_parent("tr")
+        if parent_tr and "공지" in parent_tr.get_text(strip=True).split()[0]:
             continue
 
-        link  = urljoin("https://materials.ssu.ac.kr", a["href"])
+        a = td.find("a", href=True)
+        if not a: continue
+
         title = a.get_text(" ", strip=True)
+        link  = urljoin("https://materials.ssu.ac.kr", a["href"])
         m = re.search(r"(num|idx)=(\d+)", link)
         nid = m.group(2) if m else md5(link)
         return nid, title, link
@@ -62,7 +60,7 @@ def main():
 
     nid, title, link = get_latest()
     if not nid:
-        print("🚫 글 링크를 찾지 못했습니다 – 구조 확인 필요"); return
+        print("🚫 파싱 실패 – 구조가 바뀌었는지 확인 필요"); return
     if nid == read_last():
         print("⏸ 새 글 없음"); return
 
