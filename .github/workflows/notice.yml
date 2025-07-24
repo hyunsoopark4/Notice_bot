@@ -1,9 +1,11 @@
 name: notice-bot
 
 on:
-  schedule:               # 매 시 정각 실행 (UTC)
-    - cron: "0 * * * *"
-  workflow_dispatch: {}   # 수동 실행도 가능
+  schedule:
+    # 매 시 정각, UTC 0~14 & 22~23 → KST 07~23
+    - cron: "0 0-14,22-23 * * *"
+  workflow_dispatch: {}
+
 
 # ── ① GITHUB_TOKEN에 쓰기 권한 부여 ── ⬅️ 추가
 permissions:
