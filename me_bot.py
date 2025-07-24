@@ -10,7 +10,7 @@ from datetime import datetime
 WEBHOOK  = os.getenv("DISCORD_WEBHOOK_ME")                 # 디스코드 웹훅
 # ① 아래 URL을 **본인 워커 주소**로 바꿔 주세요
 LIST_URL = (
-    "https://me-proxy.<subdomain>.workers.dev/"
+    "https://yellow-unit-fd5c.hyunsoopark4.workers.dev/"
     "?url=https://me.ssu.ac.kr/notice/notice01.php"
 )
 ID_FILE  = "last_me_id.txt"
