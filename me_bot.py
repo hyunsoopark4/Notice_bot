@@ -1,4 +1,4 @@
-# me_bot.py  ── 날짜 셀 하이픈·점 모두 매칭 버전
+# me_bot.py  ── A: 날짜 기준 / B: 링크 우선 2단계 탐색
 import os, re, sys, time, requests
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -6,60 +6,61 @@ from urllib.parse import quote_plus
 
 WEBHOOK = os.getenv("DISCORD_WEBHOOK_ME")
 
-WORKER   = "https://yellow-unit-fd5c.hyunsoopark4.workers.dev/?url="
-SRC_URL  = "http://me.ssu.ac.kr/notice/notice01.php"
-LIST_URL = WORKER + quote_plus(SRC_URL)
+WORKER  = "https://yellow-unit-fd5c.hyunsoopark4.workers.dev/?url="
+SRC     = "http://me.ssu.ac.kr/notice/notice01.php"
+LIST_URL = WORKER + quote_plus(SRC)
 
-ID_FILE  = "last_me_id.txt"
-HEADERS  = {"User-Agent": "Mozilla/5.0"}
+ID_FILE = "last_me_id.txt"
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-TIMEOUT  = (5, 60)
-RETRY    = 3
+TIMEOUT = (5, 60)
+RETRY   = 3
+DATE_RE = re.compile(r"\d{4}[.\-]\d{2}[.\-]\d{2}")
 
-DATE_RE  = re.compile(r"\d{4}[.\-]\d{2}[.\-]\d{2}")   # ← 점·하이픈 모두 OK
-
-def parse_date(t: str) -> datetime:
-    return datetime.strptime(t.strip().replace(".", "-"), "%Y-%m-%d")
+def parse_date(s: str) -> datetime:
+    return datetime.strptime(s.replace(".", "-").strip(), "%Y-%m-%d")
 
 def fetch_html():
     for i in range(1, RETRY + 1):
         try:
             r = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT)
-            if r.status_code == 200 and "<html" in r.text.lower():
-                print(f"✅ Worker 성공 (try {i})")
-                return r.text
-            print(f"⚠️ Worker status {r.status_code} (try {i})")
+            if r.status_code == 200:
+                print(f"✅ Worker 200 (try {i})"); return r.text
+            print(f"⚠️ Worker {r.status_code} (try {i})")
         except requests.RequestException as e:
-            print(f"⚠️ Worker 오류 (try {i}) – {e}")
+            print(f"⚠️ Worker err (try {i}) – {e}")
         time.sleep(1)
     return None
 
 def get_latest():
     html = fetch_html()
-    if not html:
-        return None, None, None
+    if not html: return None, None, None
+    soup = BeautifulSoup(html, "html.parser")
 
-    soup, latest_dt, latest_a = BeautifulSoup(html, "html.parser"), datetime.min, None
+    # ── A단계: 날짜 셀 기준
+    latest_dt, latest_a = datetime.min, None
     for tr in soup.select("tr"):
-        date_td = tr.find("td", string=DATE_RE)
-        link_a  = tr.find("a", href=lambda h: h and "wr_id=" in h)
-        if not (date_td and link_a):
-            continue
+        d = tr.find("td", string=DATE_RE)
+        a = tr.find("a", href=lambda h: h and "wr_id=" in h)
+        if not (d and a): continue
         try:
-            cur_dt = parse_date(date_td.get_text())
+            cur = parse_date(d.get_text())
         except ValueError:
             continue
-        if cur_dt >= latest_dt:
-            latest_dt, latest_a = cur_dt, link_a
-
+        if cur >= latest_dt:
+            latest_dt, latest_a = cur, a
+    # ── B단계: fallback – wr_id 링크 첫 번째
     if not latest_a:
-        return None, None, None
+        latest_a = soup.find("a", href=lambda h: h and "wr_id=" in h)
+        if not latest_a:
+            return None, None, None
 
     link = latest_a["href"]
     if link.startswith("/"):
         link = "https://me.ssu.ac.kr" + link
     wid  = re.search(r"wr_id=(\d+)", link).group(1)
-    return wid, latest_a.get_text(strip=True), link
+    title = latest_a.get_text(strip=True)
+    return wid, title, link
 
 def read_last():
     try: return open(ID_FILE).read().strip()
@@ -75,16 +76,12 @@ def main():
 
     wid, title, link = get_latest()
     if not wid:
-        print("🚫 Worker 실패 또는 파싱 실패 – 다음 주기 스킵")
-        return
-
+        print("🚫 파싱 실패 – 다음 주기 스킵"); return
     if wid == read_last():
-        print("⏸  새 글 없음")
-        return
+        print("⏸ 새 글 없음"); return
 
     send(f"🔧 **기계공학부 새 공지**\n{title}\n{link}")
-    write_last(wid)
-    print("✅ 새 공지 전송 완료")
+    write_last(wid); print("✅ 새 공지 전송 완료")
 
 if __name__ == "__main__":
     main()
