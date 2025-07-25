@@ -1,9 +1,9 @@
-# chemeng_bot.py  ─ 화학공학과(sub03_01.php) 최신 공지 알림
+# chemeng_bot.py — 화학공학과(sub03_01) 공지 알림 (링크 패턴 기반)
 import os, re, sys, hashlib, requests, traceback
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-WEBHOOK  = os.getenv("DISCORD_WEBHOOK_CHEMENG")          # ← 레포 Secrets
+WEBHOOK  = os.getenv("DISCORD_WEBHOOK_CHEMENG")          # ← Secrets
 LIST_URL = "http://chemeng.ssu.ac.kr/sub/sub03_01.php"
 ID_FILE  = "last_chemeng_id.txt"
 
@@ -13,41 +13,41 @@ md5      = lambda s: hashlib.md5(s.encode()).hexdigest()
 
 def smart_decode(b: bytes) -> str:
     for enc in ("utf-8", "cp949", "euc-kr"):
-        try: return b.decode(enc)
-        except UnicodeDecodeError: pass
+        try:
+            return b.decode(enc)
+        except UnicodeDecodeError:
+            continue
     return b.decode("utf-8", "replace")
 
-def fetch_html() -> str | None:
+def fetch_html():
     try:
         r = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT)
         return smart_decode(r.content)
     except Exception:
         traceback.print_exc(); return None
 
+def is_notice(text: str) -> bool:
+    """고정 공지 여부: [공지] · '공지' 단어가 제목 앞쪽에 있으면 True"""
+    return bool(re.match(r"\s*\[?공지\]?", text))
+
 def get_latest():
     html = fetch_html()
-    if not html: return None, None, None
+    if not html:
+        return None, None, None
+
     soup = BeautifulSoup(html, "html.parser")
 
-    # 제목 셀(class name에 'subject' 포함) 우선
-    for td in soup.select("td[class*=subject], td[class*=subj]"):
-        tr = td.find_parent("tr")
+    # a href 에 ?idx= 또는 ?num= 가 포함된 링크를 위에서부터 탐색
+    pattern = re.compile(r"[?&](idx|num)=\d+", re.I)
 
-        # 고정 공지: tr 안에 '공지' 글자 또는 alt='공지' 아이콘 존재
-        if tr and ("공지" in tr.get_text(strip=True) or
-                   tr.find("img", alt=lambda v: v and "공지" in v)):
-            continue
-
-        a = td.find("a", href=True)
-        if not a:
-            continue
-
+    for a in soup.find_all("a", href=pattern):
         title = a.get_text(" ", strip=True)
-        link  = urljoin("http://chemeng.ssu.ac.kr", a["href"])
+        if is_notice(title):
+            continue                             # 고정 공지 skip
 
-        m = re.search(r"(idx|num)=(\d+)", link)
-        nid = m.group(2) if m else md5(link)        # 글 ID
-
+        link = urljoin("http://chemeng.ssu.ac.kr", a["href"])
+        m = re.search(pattern, link)
+        nid = m.group(0).split("=")[-1] if m else md5(link)
         return nid, title, link
 
     return None, None, None
@@ -56,9 +56,10 @@ def read_last():
     try: return open(ID_FILE).read().strip()
     except FileNotFoundError: return None
 
-def write_last(nid): open(ID_FILE, "w").write(nid)
+def write_last(n): open(ID_FILE, "w").write(n)
 
-def send(msg): requests.post(WEBHOOK, json={"content": msg}, timeout=10)
+def send(msg):
+    requests.post(WEBHOOK, json={"content": msg}, timeout=10)
 
 def main():
     if not WEBHOOK:
@@ -66,7 +67,7 @@ def main():
 
     nid, title, link = get_latest()
     if not nid:
-        print("🚫 공지 파싱 실패 – 구조 확인 필요"); return
+        print("🚫 공지 파싱 실패 — 사이트 구조가 예상과 다른 듯합니다"); return
     if nid == read_last():
         print("⏸ 새 글 없음"); return
 
