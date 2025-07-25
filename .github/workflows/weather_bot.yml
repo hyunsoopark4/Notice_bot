@@ -1,31 +1,26 @@
-name: weather_bot          # 워크플로 이름
+name: weather-bot
 
 on:
   schedule:
-    # 매일 22시 UTC → 07시 KST
-    - cron: "0 22 * * *"
+    # 매일 06:30(KST) = UTC 21:30
+    - cron: "30 21 * * *"
   workflow_dispatch: {}
-
-permissions:
-  contents: none           # 상태파일 저장 없음
 
 jobs:
   run:
     runs-on: ubuntu-latest
-
     env:
-      KMA_API_KEY: ${{ secrets.KMA_API_KEY }}
       DISCORD_WEBHOOK_UMBRELLA: ${{ secrets.DISCORD_WEBHOOK_UMBRELLA }}
+      OWM_API_KEY:             ${{ secrets.OWM_API_KEY }}
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
+        with: { python-version: "3.x" }
 
-      - name: Install deps
-        run: pip install requests beautifulsoup4
+      - name: Install requests
+        run: pip install requests
 
       - name: Run weather_bot
-        run: python weather_bot.py      # ← 파일명과 맞춰서 실행
+        run: python weather_bot.py
