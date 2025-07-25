@@ -19,6 +19,10 @@ md5        = lambda s: hashlib.md5(s.encode()).hexdigest()
 # ── 최신 글 링크 & ID ───────────────────────────────────────
 def get_latest():
     html = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT).text
+      # ── 디버그: 받은 HTML 앞 800 byte 출력 ──
+    print("=== DEBUG HTML HEAD ===")
+    print(html[:800])
+    print("=== DEBUG END ===")
     soup = BeautifulSoup(html, "html.parser")
 
     for tr in soup.select("table.board_list tbody tr"):
