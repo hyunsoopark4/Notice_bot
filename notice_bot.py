@@ -1,57 +1,82 @@
-# notice_bot.py  ― 학사공지 최신 글 알림 (요약 없이 제목 + 링크만 전송)
-#   • 고정 공지·과거 글 문제 없이 "가장 최근 게시" 한 건만 디스코드 전송
-#   • GPT·요약 기능 제거 → openai 설치 필요 없음
-#   • 웹훅 환경변수: DISCORD_WEBHOOK_URL
-# --------------------------------------------------------------
-import os, re, sys, hashlib, requests, time
+# notice_bot.py  (복붙 OK)
+
+import os, sys, json, re, requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
 
-# ── 환경변수 ────────────────────────────────────────────────
-WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")  # 디스코드 웹훅 (필수)
+# 1. 디스코드 웹훅 읽기 -------------------------------------------------
+WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+if not WEBHOOK_URL:
+    try:
+        with open("config.json", encoding="utf-8") as f:
+            WEBHOOK_URL = json.load(f)["DISCORD_WEBHOOK_URL"]
+    except (FileNotFoundError, KeyError):
+        sys.exit("❌ DISCORD_WEBHOOK_URL 설정이 없습니다")
 
-SITE   = "https://scatch.ssu.ac.kr"
-LIST_URL = f"{SITE}/공지사항"            # 학사공지 목록
-ID_FILE  = "last_notice_id.txt"
+# 2. 게시판 URL & 상태파일 ---------------------------------------------
+NOTICE_URL = "https://scatch.ssu.ac.kr/%EA%B3%B5%EC%A7%80%EC%82%AC%ED%95%AD/"
+LAST_NOTICE_FILE = "last_notice_id.txt"
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
-TIMEOUT = 15
-md5     = lambda s: hashlib.md5(s.encode()).hexdigest()
+# 3. 최신 글 한 건 긁어오기 ---------------------------------------------
+def get_latest_notice():
+    resp = requests.get(
+        NOTICE_URL,
+        timeout=10,
+        headers={"User-Agent": "Mozilla/5.0"}  # 봇 차단 회피용
+    )
+    resp.raise_for_status()
 
-# ── 최신 글 링크 & 제목 추출 ───────────────────────────────
-def get_latest():
-    j = requests.get(API_URL, timeout=15).json()
-    if not j:
-        return None, None, None
-    post = j[0]
-    nid   = str(post["id"])
-    title = BeautifulSoup(post["title"]["rendered"], "html.parser").get_text()
-    link  = post["link"]
-    return nid, title, link
-# ── 상태 파일 IO ───────────────────────────────────────────
-read_last  = lambda: open(ID_FILE).read().strip() if os.path.exists(ID_FILE) else None
-write_last = lambda x: open(ID_FILE, "w").write(x)
+    soup = BeautifulSoup(resp.text, "html.parser")
 
-# ── 디스코드 전송 ─────────────────────────────────────────
+    # ★ 여기!  ─────────────────────────────────────
+    link_tag = soup.select_one("ul.notice-lists li a")
+    # ─────────────────────────────────────────────
+
+    if not link_tag:
+        return None, None, None        # 구조가 또 바뀌면 None 반환
+
+    link = link_tag["href"]
+    if link.startswith("/"):
+        link = "https://scatch.ssu.ac.kr" + link
+
+    title = link_tag.get_text(strip=True)
+
+    # 링크에 ?num=12345 가 들어 있으니 그 숫자를 공지 ID로 사용
+    m = re.search(r"[?&]num=(\d+)", link)
+    notice_id = m.group(1) if m else link   # 혹시 못 찾으면 링크 자체
+
+    return notice_id, title, link
+
+# 4. 상태 파일 read / write --------------------------------------------
+def read_last_id():
+    try:
+        with open(LAST_NOTICE_FILE, encoding="utf-8") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return None
+
+def write_last_id(nid):
+    with open(LAST_NOTICE_FILE, "w", encoding="utf-8") as f:
+        f.write(str(nid))
+
+# 5. 디스코드 전송 -------------------------------------------------------
 def send(msg):
-    requests.post(WEBHOOK, json={"content": msg}, timeout=10)
+    requests.post(WEBHOOK_URL, json={"content": msg}, timeout=10)
 
-# ── 메인 ─────────────────────────────────────────────────
+# 6. 메인 루틴 ----------------------------------------------------------
 def main():
-    if not WEBHOOK:
-        sys.exit("❌  DISCORD_WEBHOOK_URL 시크릿이 없습니다")
+    last_id = read_last_id()
+    notice_id, title, link = get_latest_notice()
 
-    nid, title, link = get_latest()
-    if not nid:
-        sys.exit("🚫 목록 파싱 실패 – 페이지 구조 확인 필요")
-
-    if nid == read_last():
-        print("⏸ 새 글 없음")
+    if not notice_id:
+        print("❌ 공지 셀렉터 불일치 – 구조를 다시 확인하세요")
         return
 
-    send(f"📚 **{title}**\n{link}")
-    write_last(nid)
-    print("✅ 공지 전송 완료")
+    if notice_id != last_id:
+        send(f"📢 **새 학사 공지**\n{title}\n{link}")
+        write_last_id(notice_id)
+        print("✅ 새 공지를 디스코드로 전송했습니다")
+    else:
+        print("⏸  새 공지가 없습니다")
 
 if __name__ == "__main__":
     main()
