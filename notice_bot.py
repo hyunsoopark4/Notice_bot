@@ -19,22 +19,21 @@ md5        = lambda s: hashlib.md5(s.encode()).hexdigest()
 # ── 최신 글 링크 & ID ───────────────────────────────────────
 def get_latest():
     html = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT).text
-      # ── 디버그: 받은 HTML 앞 800 byte 출력 ──
-    print("=== DEBUG HTML HEAD ===")
-    print(html[:800])
-    print("=== DEBUG END ===")
     soup = BeautifulSoup(html, "html.parser")
 
-    for tr in soup.select("table.board_list tbody tr"):
-        a = tr.find("a", href=True)
-        if not a:
-            continue
-        href = urljoin(BASE, a["href"])
-        # ID 추출 우선순위: articleId= | 숫자 끝 | md5
-        m = re.search(r"articleId=(\d+)", href) or re.search(r"/(\d+)$", href)
-        aid = m.group(1) if m else md5(href)
-        return aid, href
-    return None, None
+    # ✨ WordPress 리스트용 셀렉터
+    a = soup.select_one("main h2.entry-title a[href*='articleId']")
+    if not a:
+        # 이전 테이블 버전도 겸용 지원
+        a = soup.select_one("table.board_list a[href*='articleId']")
+
+    if not a:
+        return None, None
+
+    link = urljoin(BASE, a["href"])
+    m = re.search(r"articleId=(\d+)", link)
+    aid = m.group(1) if m else md5(link)
+    return aid, link
 
 # ── 본문 스크래핑 ───────────────────────────────────────────
 def fetch_content(link):
