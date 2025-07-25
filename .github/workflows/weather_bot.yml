@@ -1,17 +1,17 @@
-name: weather-bot
+name: kma-weather-bot
 
 on:
   schedule:
-    # 매일 06:30(KST) = UTC 21:30
-    - cron: "30 21 * * *"
+    # 매일 06:40 KST (UTC 21:40) 실행
+    - cron: "40 21 * * *"
   workflow_dispatch: {}
 
 jobs:
   run:
     runs-on: ubuntu-latest
     env:
+      KMA_API_KEY:             ${{ secrets.KMA_API_KEY }}
       DISCORD_WEBHOOK_UMBRELLA: ${{ secrets.DISCORD_WEBHOOK_UMBRELLA }}
-      OWM_API_KEY:             ${{ secrets.OWM_API_KEY }}
 
     steps:
       - uses: actions/checkout@v4
@@ -22,5 +22,5 @@ jobs:
       - name: Install requests
         run: pip install requests
 
-      - name: Run weather_bot
-        run: python weather_bot.py
+      - name: Run kma_weather_bot
+        run: python kma_weather_bot.py
