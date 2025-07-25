@@ -20,26 +20,14 @@ md5     = lambda s: hashlib.md5(s.encode()).hexdigest()
 
 # ── 최신 글 링크 & 제목 추출 ───────────────────────────────
 def get_latest():
-    html = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT).text
-    soup = BeautifulSoup(html, "html.parser")
-
-    # ① 최신 WordPress 형식: <article> → <h2 class="entry-title"><a …>
-    a = soup.select_one("article h2.entry-title a[href]")
-    # ② 구형 테이블 형식: <table class="board_list"> … <a href*='articleId'>
-    if not a:
-        a = soup.select_one("table.board_list a[href*='articleId']")
-
-    if not a:
+    j = requests.get(API_URL, timeout=15).json()
+    if not j:
         return None, None, None
-
-    link = urljoin(SITE, a["href"])
-    title = a.get_text(" ", strip=True)
-
-    m = re.search(r"articleId=(\d+)", link) or re.search(r"/(\d+)/?$", link)
-    nid = m.group(1) if m else md5(link)   # 글 ID (중복 알림 방지용)
-
+    post = j[0]
+    nid   = str(post["id"])
+    title = BeautifulSoup(post["title"]["rendered"], "html.parser").get_text()
+    link  = post["link"]
     return nid, title, link
-
 # ── 상태 파일 IO ───────────────────────────────────────────
 read_last  = lambda: open(ID_FILE).read().strip() if os.path.exists(ID_FILE) else None
 write_last = lambda x: open(ID_FILE, "w").write(x)
