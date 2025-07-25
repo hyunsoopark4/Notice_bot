@@ -1,6 +1,6 @@
 # notice_bot.py ─ 학사공지 RSS + GPT 3줄 요약 (feedparser 견고 버전)
 import os, re, sys, requests, textwrap, time, hashlib
-import feedparser, openai, html2text
+import feedparser, openai
 from bs4 import BeautifulSoup
 
 # ── 환경 변수 ─────────────────────────────────────────────
