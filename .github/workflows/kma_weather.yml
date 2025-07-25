@@ -1,8 +1,7 @@
 name: kma-weather-bot
-
 on:
   schedule:
-    # 매일 06:40 KST (UTC 21:40) 실행
+    # 매일 06:40 KST = UTC 21:40
     - cron: "40 21 * * *"
   workflow_dispatch: {}
 
@@ -15,12 +14,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with: { python-version: "3.x" }
-
-      - name: Install requests
-        run: pip install requests
-
-      - name: Run kma_weather_bot
-        run: python kma_weather_bot.py
+      - run: pip install requests
+      - run: python kma_weather_bot.py
