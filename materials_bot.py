@@ -1,14 +1,14 @@
-# materials_bot.py — 번호·날짜 제거: subject 셀만 취득
+# materials_bot.py — board_list 테이블 첫 글만 추출 (최소·안정 버전)
 import os, re, sys, hashlib, requests, traceback
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-WEBHOOK  = os.getenv("DISCORD_WEBHOOK_MSE")          # Secrets
+WEBHOOK  = os.getenv("DISCORD_WEBHOOK_MSE")              # ▸ Secrets
 LIST_URL = "https://materials.ssu.ac.kr/bbs/board.php?tbl=bbs51"
 ID_FILE  = "last_mse_id.txt"
 HEADERS  = {"User-Agent": "Mozilla/5.0"}
-TIMEOUT  = 15
-md5      = lambda s: hashlib.md5(s.encode()).hexdigest()
+TIMEOUT  = 20
+md5 = lambda s: hashlib.md5(s.encode()).hexdigest()
 
 def smart_decode(b: bytes) -> str:
     for enc in ("utf-8", "cp949", "euc-kr"):
@@ -28,23 +28,23 @@ def get_latest():
     if not html: return None, None, None
     soup = BeautifulSoup(html, "html.parser")
 
-    for tr in soup.select("tbody tr"):
-        # 고정 공지: 첫 td(번호칸)에 '공지'가 있으면 continue
-        first_td = tr.find("td")
-        if first_td and "공지" in first_td.get_text(strip=True):
+    table = soup.find("table", class_=lambda c: c and "board_list" in c)
+    if not table:
+        return None, None, None
+
+    for tr in table.select("tbody tr"):
+        # 고정 공지: tr 에 alt='공지' 또는 'ico_notice' 이미지가 있으면 continue
+        if tr.find("img", alt=lambda v: v and ("공지" in v or "notice" in v.lower())):
+            continue
+        a = tr.find("a", href=True)
+        if not a:
             continue
 
-        subj_td = tr.find("td", class_=lambda x: x and "subject" in x)
-        if not subj_td: continue
-        a = subj_td.find("a", href=True)
-        if not a: continue
-
-        title = a.get_text(" ", strip=True)           # ← 순수 제목
+        title = a.get_text(" ", strip=True)
         link  = urljoin("https://materials.ssu.ac.kr", a["href"])
         m = re.search(r"(num|idx)=(\d+)", link)
         nid = m.group(2) if m else md5(link)
         return nid, title, link
-
     return None, None, None
 
 def read_last():
@@ -53,7 +53,8 @@ def read_last():
 
 def write_last(n): open(ID_FILE, "w").write(n)
 
-def send(msg): requests.post(WEBHOOK, json={"content": msg}, timeout=10)
+def send(msg):
+    requests.post(WEBHOOK, json={"content": msg}, timeout=10)
 
 def main():
     if not WEBHOOK:
@@ -61,7 +62,7 @@ def main():
 
     nid, title, link = get_latest()
     if not nid:
-        print("🚫 파싱 실패 – 구조 확인 필요"); return
+        print("🚫 글을 찾지 못했습니다 – 게시판 HTML 구조가 또 바뀐 듯합니다"); return
     if nid == read_last():
         print("⏸ 새 글 없음"); return
 
