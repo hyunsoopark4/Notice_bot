@@ -28,7 +28,7 @@ jobs:
           python-version: "3.x"
 
       - name: Install deps
-        run: pip install requests beautifulsoup4   # selenium 안 쓰면 삭제
+        run: pip install requests beautifulsoup4 openai  # selenium 안 쓰면 삭제
 
       - name: Run bot
         run: python notice_bot.py
