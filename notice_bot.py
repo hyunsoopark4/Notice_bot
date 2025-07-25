@@ -20,6 +20,12 @@ md5       = lambda s: hashlib.md5(s.encode()).hexdigest()
 def get_latest_link():
     html = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT).text
     soup = BeautifulSoup(html, "html.parser")
+    
+    # ── 디버그: 위쪽 링크 3개 class·href 출력 ──
+    for a in soup.find_all("a", href=True)[:3]:
+        print("DEBUG:", a.get("class"), a["href"])
+
+    
     a = soup.select_one("table.board_list a[href*='articleId']")
     if not a:
         return None, None
