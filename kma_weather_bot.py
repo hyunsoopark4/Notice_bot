@@ -14,8 +14,8 @@ SERVICE_KEY = os.getenv("KMA_API_KEY")
 # 서울 종로구 격자 좌표
 NX, NY = 60, 127
 
-POP_THRESHOLD  = 60      # 강수확률 ≥ 60 %
-PCP_THRESHOLD  = 1.0     # 시간당 강수량 ≥ 1 mm
+POP_THRESHOLD  = 0      # 강수확률 ≥ 60 %
+PCP_THRESHOLD  = 0.0     # 시간당 강수량 ≥ 1 mm
 HOURS_AHEAD    = 24      # 앞으로 24 시간만 검사
 
 KST = dt.timezone(dt.timedelta(hours=9))
