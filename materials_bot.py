@@ -16,9 +16,15 @@ def smart_decode(b: bytes) -> str:
         except UnicodeDecodeError: pass
     return b.decode("utf-8", "replace")
 
+DEBUG = True
+
 def fetch_html() -> str | None:
     try:
         r = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT)
+         if DEBUG:                      # ★ 첫 1000자 콘솔에 출력
+            print("\n=== HTML HEAD ===")
+            print(html[:1000])
+            print("=== HTML HEAD END ===\n")
         return smart_decode(r.content)
     except Exception:
         traceback.print_exc(); return None
