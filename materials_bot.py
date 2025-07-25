@@ -1,9 +1,9 @@
-# materials_bot.py  –  subject 셀만 대상으로 고정 공지 정확 필터
+# materials_bot.py  –  다중 인코딩 자동 판별판
 import os, re, sys, hashlib, requests, traceback
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-WEBHOOK  = os.getenv("DISCORD_WEBHOOK_MSE")               # ← Secrets
+WEBHOOK  = os.getenv("DISCORD_WEBHOOK_MSE")
 LIST_URL = "https://materials.ssu.ac.kr/bbs/board.php?tbl=bbs51"
 ID_FILE  = "last_mse_id.txt"
 HEADERS  = {"User-Agent": "Mozilla/5.0"}
@@ -11,9 +11,13 @@ TIMEOUT  = 15
 md5 = lambda s: hashlib.md5(s.encode()).hexdigest()
 
 def smart_decode(b: bytes) -> str:
+    """UTF-8 → CP949 순으로 시도해 첫 성공 인코딩 사용"""
     for enc in ("utf-8", "cp949", "euc-kr"):
-        try: return b.decode(enc)
-        except UnicodeDecodeError: pass
+        try:
+            return b.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    # 모두 실패 시 손실 복구
     return b.decode("utf-8", "replace")
 
 def fetch_html() -> str | None:
@@ -21,28 +25,30 @@ def fetch_html() -> str | None:
         r = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT)
         return smart_decode(r.content)
     except Exception:
-        traceback.print_exc(); return None
+        traceback.print_exc()
+        return None
 
 def get_latest():
     html = fetch_html()
-    if not html: return None, None, None
+    if not html:
+        return None, None, None
+
     soup = BeautifulSoup(html, "html.parser")
 
-    # 제목 셀(td) 클래스가 subject / subj 로 되어 있음
-    for td in soup.select("td.subject, td.subj"):
-        # 고정 공지(tr 안에 '공지' 텍스트가 별도 셀로 존재)
-        parent_tr = td.find_parent("tr")
-        if parent_tr and "공지" in parent_tr.get_text(strip=True).split()[0]:
+    # 글 목록 <tbody><tr> or <ul><li>
+    for a in soup.find_all("a", href=True):
+        href, text = a["href"], a.get_text(strip=True)
+
+        # 고정 공지(공지 텍스트·아이콘) 건너뛰기
+        if "공지" in text or a.find("img", alt=lambda v: v and "공지" in v):
+            continue
+        if not re.search(r"(view|num|idx)=", href):
             continue
 
-        a = td.find("a", href=True)
-        if not a: continue
-
-        title = a.get_text(" ", strip=True)
-        link  = urljoin("https://materials.ssu.ac.kr", a["href"])
+        link = urljoin("https://materials.ssu.ac.kr", href)
         m = re.search(r"(num|idx)=(\d+)", link)
         nid = m.group(2) if m else md5(link)
-        return nid, title, link
+        return nid, text, link
 
     return None, None, None
 
@@ -50,9 +56,10 @@ def read_last():
     try: return open(ID_FILE).read().strip()
     except FileNotFoundError: return None
 
-def write_last(n): open(ID_FILE, "w").write(n)
+def write_last(nid): open(ID_FILE, "w").write(nid)
 
-def send(msg): requests.post(WEBHOOK, json={"content": msg}, timeout=10)
+def send(msg):
+    requests.post(WEBHOOK, json={"content": msg}, timeout=10)
 
 def main():
     if not WEBHOOK:
@@ -60,7 +67,7 @@ def main():
 
     nid, title, link = get_latest()
     if not nid:
-        print("🚫 파싱 실패 – 구조가 바뀌었는지 확인 필요"); return
+        print("🚫 파싱 실패 – 스킵"); return
     if nid == read_last():
         print("⏸ 새 글 없음"); return
 
