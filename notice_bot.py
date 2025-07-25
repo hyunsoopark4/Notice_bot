@@ -1,51 +1,44 @@
-# notice_bot.py  ― 학사공지 + GPT 3줄 요약 (테이블 파싱 확정판)
-import os, re, sys, requests, hashlib, textwrap, traceback
+# notice_bot.py ― 학사공지 RSS + GPT 3줄 요약
+import os, re, sys, requests, textwrap, hashlib, traceback, xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
 import openai
 
-# ── 환경 변수 ────────────────────────────────────────────────
-WEBHOOK    = os.getenv("DISCORD_WEBHOOK_URL")      # 학사 디스코드 웹훅
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")           # (없어도 동작)
+# ── 환경 변수 ───────────────────────────────────────────────
+WEBHOOK     = os.getenv("DISCORD_WEBHOOK_URL")      # 디스코드 웹훅
+OPENAI_KEY  = os.getenv("OPENAI_API_KEY")           # 선택
 openai.api_key = OPENAI_KEY
 
-BASE       = "https://scatch.ssu.ac.kr"
-LIST_URL   = f"{BASE}/공지사항"
-ID_FILE    = "last_notice_id.txt"
-HEADERS    = {"User-Agent": "Mozilla/5.0"}
-TIMEOUT    = 15
-md5        = lambda s: hashlib.md5(s.encode()).hexdigest()
+RSS_URL   = "https://scatch.ssu.ac.kr/feed"         # 학사공지 RSS
+ID_FILE   = "last_notice_id.txt"
+HEADERS   = {"User-Agent": "Mozilla/5.0"}
+TIMEOUT   = 15
+md5       = lambda s: hashlib.md5(s.encode()).hexdigest()
 
-# ── 최신 글 링크 & ID ───────────────────────────────────────
-def get_latest():
-    html = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT).text
-    soup = BeautifulSoup(html, "html.parser")
+# ── 최신 글 링크·제목·본문 추출 ───────────────────────────────
+def get_latest_post():
+    xml = requests.get(RSS_URL, headers=HEADERS, timeout=TIMEOUT).text
+    root = ET.fromstring(xml)
+    # 첫 <item> 이 최신 글
+    item = root.find("./channel/item")
+    if item is None:
+        return None, None, None
+    title = item.findtext("title", "").strip()
+    link  = item.findtext("link", "").strip()
+    # 본문 HTML → 텍스트
+    desc_html = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded", "")
+    text = BeautifulSoup(desc_html, "html.parser").get_text(" ", strip=True)
+    return title, link, textwrap.shorten(text, 4000)
 
-    # ✨ WordPress 리스트용 셀렉터
-    a = soup.select_one("main h2.entry-title a[href*='articleId']")
-    if not a:
-        # 이전 테이블 버전도 겸용 지원
-        a = soup.select_one("table.board_list a[href*='articleId']")
+# ── 파일 IO ─────────────────────────────────────────────────
+def read_last():
+    try: return open(ID_FILE).read().strip()
+    except FileNotFoundError: return None
 
-    if not a:
-        return None, None
+def write_last(n): open(ID_FILE, "w").write(n)
 
-    link = urljoin(BASE, a["href"])
-    m = re.search(r"articleId=(\d+)", link)
-    aid = m.group(1) if m else md5(link)
-    return aid, link
-
-# ── 본문 스크래핑 ───────────────────────────────────────────
-def fetch_content(link):
-    html = requests.get(link, headers=HEADERS, timeout=TIMEOUT).text
-    soup = BeautifulSoup(html, "html.parser")
-    title = soup.select_one("h4.tit").get_text(" ", strip=True)
-    body  = soup.select_one("div.board_view").get_text(" ", strip=True)
-    return title, textwrap.shorten(body, 4000)
-
-# ── 요약 ───────────────────────────────────────────────────
+# ── GPT 요약 ────────────────────────────────────────────────
 def gpt_summary(txt):
-    prompt = ("다음 학사 공지를 한국어로 3줄 이하 핵심 요약:\n" + txt)
+    prompt = ("다음 학사 공지를 한국어로 최대 3줄로 핵심 요약:\n" + txt)
     r = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
@@ -56,26 +49,23 @@ def gpt_summary(txt):
 def fallback(txt):
     return textwrap.shorten(txt, 200) + "\n(요약모드 OFF)"
 
-# ── 상태 파일 ──────────────────────────────────────────────
-read_last = lambda: open(ID_FILE).read().strip() if os.path.exists(ID_FILE) else None
-write_last = lambda x: open(ID_FILE, "w").write(x)
+# ── 디스코드 전송 ───────────────────────────────────────────
+def send(msg): requests.post(WEBHOOK, json={"content": msg}, timeout=10)
 
-# ── 디스코드 전송 ─────────────────────────────────────────
-def send(msg):
-    requests.post(WEBHOOK, json={"content": msg}, timeout=10)
-
-# ── 메인 ─────────────────────────────────────────────────
+# ── 메인 ───────────────────────────────────────────────────
 def main():
     if not WEBHOOK:
         sys.exit("❌ DISCORD_WEBHOOK_URL 시크릿이 없습니다")
 
-    aid, link = get_latest()
-    if not aid:
-        print("🚫 목록 파싱 실패"); return
-    if aid == read_last():
+    title, link, body = get_latest_post()
+    if not link:
+        print("🚫 RSS 파싱 실패"); return
+
+    post_id = re.search(r"/(\d+)/?$", link)
+    pid = post_id.group(1) if post_id else md5(link)
+    if pid == read_last():
         print("⏸ 새 글 없음"); return
 
-    title, body = fetch_content(link)
     try:
         summary = gpt_summary(body) if OPENAI_KEY else fallback(body)
     except Exception as e:
@@ -83,7 +73,7 @@ def main():
         summary = fallback(body)
 
     send(f"📚 **{title}**\n{summary}\n{link}")
-    write_last(aid)
+    write_last(pid)
     print("✅ 공지 + 요약 전송 완료")
 
 if __name__ == "__main__":
