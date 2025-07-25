@@ -1,18 +1,13 @@
-# notice_bot.py  ― 학사공지 + AI 3줄 요약 (OpenAI GPT-3.5)
-# ─────────────────────────────────────────────────────────────
-# ① scatch.ssu.ac.kr 최신 공지 1건을 읽어 본문 크롤링
-# ② OPENAI_API_KEY가 있으면 GPT-3.5로 3줄 요약
-#    (없으면 첫 200자 잘라서 요약 자리 대체)
-# ③ 디스코드 : 제목 + 요약 3줄 + 링크 전송
-# ─────────────────────────────────────────────────────────────
+# notice_bot.py  ― 학사공지 + GPT 3줄 요약 (웹훅 변수 = DISCORD_WEBHOOK_URL)
+# ─ 웹훅 env 이름을 DISCORD_WEBHOOK_URL 로 통일 ─
 import os, re, sys, requests, hashlib, traceback, textwrap
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import openai
 
 # ── 환경 변수 ──────────────────────────────────────────────────
-WEBHOOK   = os.getenv("DISCORD_WEBHOOK_NOTICE")      # 디스코드 웹훅
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")             # 요약용 (선택)
+WEBHOOK    = os.getenv("DISCORD_WEBHOOK_URL")      # 웹훅 이름 변경
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_KEY
 
 LIST_URL  = "https://scatch.ssu.ac.kr/%EA%B3%B5%EC%A7%80%EC%82%AC%ED%95%AD"
@@ -25,7 +20,7 @@ md5       = lambda s: hashlib.md5(s.encode()).hexdigest()
 def get_latest_link():
     html = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT).text
     soup = BeautifulSoup(html, "html.parser")
-    a = soup.select_one("table.board_list a[href*='articleId']")  # 첫 글
+    a = soup.select_one("table.board_list a[href*='articleId']")
     if not a:
         return None, None
     link = urljoin("https://scatch.ssu.ac.kr", a["href"])
@@ -38,12 +33,12 @@ def fetch_content(link):
     soup = BeautifulSoup(html, "html.parser")
     title = soup.select_one("h4.tit").get_text(" ", strip=True)
     body  = soup.select_one("div.board_view").get_text(" ", strip=True)
-    return title, textwrap.shorten(body, 4000)        # GPT 토큰 제한 대비
+    return title, textwrap.shorten(body, 4000)
 
-# ── GPT-3.5 요약 (3줄) ─────────────────────────────────────────
+# ── GPT 3줄 요약 ───────────────────────────────────────────────
 def gpt_summary(text):
     prompt = (
-        "다음 학사 공지 본문을 한국어로 최대 3줄로 핵심만 요약해 주세요.\n"
+        "다음 학사 공지 본문을 최대 3줄로 핵심 요약해 주세요.\n"
         "본문:\n" + text
     )
     resp = openai.ChatCompletion.create(
@@ -58,7 +53,7 @@ def fallback_summary(text):
     short = textwrap.shorten(text, 200, placeholder="…")
     return short + "\n(요약모드 OFF: OPENAI_API_KEY 미설정)"
 
-# ── 파일 IO ───────────────────────────────────────────────────
+# ── 상태 파일 IO ──────────────────────────────────────────────
 def read_last():
     try: return open(LAST_ID).read().strip()
     except FileNotFoundError: return None
@@ -72,7 +67,7 @@ def send(msg):
 # ── 메인 ───────────────────────────────────────────────────────
 def main():
     if not WEBHOOK:
-        sys.exit("❌ DISCORD_WEBHOOK_NOTICE 시크릿이 없습니다")
+        sys.exit("❌ DISCORD_WEBHOOK_URL 시크릿이 없습니다")
 
     aid, link = get_latest_link()
     if not aid:
