@@ -21,13 +21,17 @@ DEBUG = True
 def fetch_html() -> str | None:
     try:
         r = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT)
-         if DEBUG:                      # ★ 첫 1000자 콘솔에 출력
+        html = smart_decode(r.content)
+
+        if DEBUG:                      # ★ 첫 1000자 콘솔에 출력
             print("\n=== HTML HEAD ===")
             print(html[:1000])
             print("=== HTML HEAD END ===\n")
-        return smart_decode(r.content)
+
+        return html
     except Exception:
-        traceback.print_exc(); return None
+        traceback.print_exc()
+        return None
 
 def get_latest():
     html = fetch_html()
