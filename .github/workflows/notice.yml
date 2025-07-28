@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      OPENAI_API_KEY:      ${{ secrets.OPENAI_API_KEY }} 
 
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +23,7 @@ jobs:
         with: { python-version: "3.x" }
 
       - name: Install deps
-        run: pip install requests beautifulsoup4
+        run: pip install requests beautifulsoup4 openai
 
       - name: Run notice_bot
         run: python notice_bot.py
