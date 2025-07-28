@@ -1,9 +1,9 @@
 import os, sys, json, re, requests, textwrap, traceback
 from bs4 import BeautifulSoup
 
-# ── 환경 변수 ───────────────────────────────────────────────
+# ── 환경변수 ──────────────────────────────────────────────
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-OPENAI_KEY  = os.getenv("OPENAI_API_KEY")     # ← 새로 추가
+OPENAI_KEY  = os.getenv("OPENAI_API_KEY")   # 없으면 요약 생략
 if not WEBHOOK_URL:
     try:
         with open("config.json", encoding="utf-8") as f:
@@ -11,37 +11,40 @@ if not WEBHOOK_URL:
     except Exception:
         sys.exit("❌ DISCORD_WEBHOOK_URL 설정이 없습니다")
 
+# openai v1.x 클라이언트
+client = None
 if OPENAI_KEY:
-    import openai
-    openai.api_key = OPENAI_KEY
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_KEY)
 
 NOTICE_URL = "https://scatch.ssu.ac.kr/공지사항/"
 LAST_FILE  = "last_notice_id.txt"
 UA_HEADER  = {"User-Agent": "Mozilla/5.0"}
 
-# ── 상태 파일 I/O ───────────────────────────────────────────
+# ── 상태 파일 I/O ─────────────────────────────────────────
 read_last  = lambda: open(LAST_FILE).read().strip() if os.path.exists(LAST_FILE) else None
 write_last = lambda x: open(LAST_FILE, "w").write(x)
 
-# ── GPT 요약 (없으면 생략) ───────────────────────────────────
+# ── GPT 요약 (v1.x 인터페이스) ────────────────────────────
 def summarize(txt: str) -> str:
-    if not OPENAI_KEY:
-        return ""  # 요약 생략
+    if not client:
+        return ""
     try:
-        resp = openai.ChatCompletion.create(
+        res = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{
                 "role": "user",
                 "content": "다음 학사 공지를 한국어로 최대 3줄 핵심 요약:\n" + txt
             }],
-            max_tokens=120, temperature=0.3,
+            max_tokens=120,
+            temperature=0.3,
         )
-        return resp.choices[0].message.content.strip()
+        return res.choices[0].message.content.strip()
     except Exception as e:
         print("GPT 요약 실패:", e)
         return ""
 
-# ── 공지 목록 파싱 ───────────────────────────────────────────
+# ── 공지 목록 파싱 ─────────────────────────────────────────
 def fetch_new_notices(last_id):
     html = requests.get(NOTICE_URL, headers=UA_HEADER, timeout=10).text
     soup = BeautifulSoup(html, "html.parser")
@@ -55,9 +58,9 @@ def fetch_new_notices(last_id):
         nid = m.group(1) if m else link
         if nid == last_id:
             break
-        title = a.get_text(" ", strip=True)
 
-        # 본문 HTML → 텍스트 (요약용)
+        title = a.get_text(" ", strip=True)
+        # 본문 HTML → 텍스트
         try:
             art = requests.get(link, headers=UA_HEADER, timeout=10).text
             body = BeautifulSoup(art, "html.parser").get_text(" ", strip=True)
@@ -67,17 +70,16 @@ def fetch_new_notices(last_id):
 
         posts.append((nid, title, link, body))
 
-    return list(reversed(posts))  # 오래된 것부터
+    return list(reversed(posts))  # 오래된 글부터 전송
 
-# ── 디스코드 전송 ────────────────────────────────────────────
-def send(content):
-    requests.post(WEBHOOK_URL, json={"content": content}, timeout=10)
+# ── 디스코드 전송 ─────────────────────────────────────────
+def send(msg):
+    requests.post(WEBHOOK_URL, json={"content": msg}, timeout=10)
 
-# ── 메인 ────────────────────────────────────────────────────
+# ── 메인 루틴 ─────────────────────────────────────────────
 def main():
-    last_id = read_last()
     try:
-        new_posts = fetch_new_notices(last_id)
+        new_posts = fetch_new_notices(read_last())
     except Exception:
         traceback.print_exc()
         sys.exit("🚫 공지 파싱 실패")
