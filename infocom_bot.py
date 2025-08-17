@@ -1,42 +1,59 @@
+# infocom_bot.py
+# 전자정보공학부 학부 공지(undergraduate) 모니터링 봇
+# 기능
+#   - 새 공지가 여러 개면 마지막으로 보낸 글 이후 전부를 오래된 것부터 전송
+#   - GitHub Actions에서 학교 서버 타임아웃을 피하려고 Cloudflare Worker 프록시를 우선 사용
+#   - 구조가 바뀌면 디버그 HTML 저장
+#
+# 필요 시크릿
+#   DISCORD_WEBHOOK_INFOCOM      디스코드 웹훅
+#   INFOCOM_PROXY_URL            선택. 예: https://your-worker.workers.dev/?url=
+#
+# 워크플로에서는 위 시크릿을 env로 주입
+
 import os
 import re
 import sys
 import json
+import time
 import traceback
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse, parse_qs
+from urllib.parse import urljoin, urlparse, parse_qs, quote
 
-# 디스코드 웹훅 (환경변수 우선, 없으면 config.json 백업)
+# 디스코드 웹훅 로드
 WEBHOOK = os.getenv("DISCORD_WEBHOOK_INFOCOM")
 if not WEBHOOK:
     try:
         with open("config.json", encoding="utf-8") as f:
             WEBHOOK = json.load(f)["DISCORD_WEBHOOK_INFOCOM"]
     except Exception:
-        sys.exit("❌ DISCORD_WEBHOOK_INFOCOM 시크릿(또는 config.json) 누락")
+        sys.exit("DISCORD_WEBHOOK_INFOCOM 시크릿(또는 config.json) 누락")
 
-# 공지 목록 URL 및 상수
+# 프록시 워커 주소. 예: https://my-worker.user.workers.dev/?url=
+WORKER = os.getenv("INFOCOM_PROXY_URL", "").rstrip("/")  # 없으면 빈 문자열
+
+# 상수
 BASE       = "https://infocom.ssu.ac.kr"
-LIST_URL   = f"{BASE}/kor/notice/undergraduate.php"
+LIST_PATH  = "/kor/notice/undergraduate.php"
+LIST_HTTPS = BASE + LIST_PATH
+LIST_HTTP  = "http://infocom.ssu.ac.kr" + LIST_PATH
 ID_FILE    = "last_infocom_id.txt"
-HEADERS    = {"User-Agent": "Mozilla/5.0"}  # 간단한 봇 차단 회피용
+HEADERS    = {"User-Agent": "Mozilla/5.0"}
 TIMEOUT    = 15
 
 def read_last_id():
-    """마지막으로 전송한 글의 idx를 읽는다."""
     try:
         return open(ID_FILE, encoding="utf-8").read().strip()
     except FileNotFoundError:
         return None
 
 def write_last_id(idx: str):
-    """마지막으로 전송한 글의 idx를 기록한다."""
     with open(ID_FILE, "w", encoding="utf-8") as f:
         f.write(str(idx))
 
 def extract_idx(href: str) -> str | None:
-    """글 링크의 쿼리에서 idx 숫자를 뽑아낸다."""
+    # 글 링크 쿼리의 idx 값을 추출
     try:
         qs = parse_qs(urlparse(href).query)
         if "idx" in qs and qs["idx"]:
@@ -46,30 +63,53 @@ def extract_idx(href: str) -> str | None:
     m = re.search(r"[?&]idx=(\d+)", href or "")
     return m.group(1) if m else None
 
+def get_with_worker(url: str) -> requests.Response:
+    # Cloudflare Worker를 통한 프록시 GET
+    proxied = f"{WORKER}?url={quote(url, safe='')}"
+    return requests.get(proxied, headers=HEADERS, timeout=TIMEOUT)
+
+def robust_get_list_html() -> str | None:
+    # 목록 HTML을 최대 3회 재시도. 우선순위: Worker → HTTPS → HTTP
+    candidates = []
+    if WORKER:
+        candidates.append(("worker", LIST_HTTPS))
+    candidates.append(("https", LIST_HTTPS))
+    candidates.append(("http", LIST_HTTP))
+
+    for label, url in candidates:
+        for attempt in range(1, 4):
+            try:
+                if label == "worker":
+                    r = get_with_worker(url)
+                else:
+                    r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+                if r.status_code == 200 and r.text.strip():
+                    print(f"소스 확보 성공: {label} try {attempt}")
+                    return r.text
+                else:
+                    print(f"비정상 응답: {label} try {attempt} status {r.status_code}")
+            except Exception as e:
+                print(f"요청 실패: {label} try {attempt} {e}")
+            time.sleep(1.5)
+    return None
+
 def fetch_new_posts(last_id: str | None):
-    """
-    목록 페이지에서 앵커들을 훑어 (idx, title, link) 리스트를 만든다.
-    last_id 이전 글을 만나면 중단하고, 새 글들만 반환한다.
-    반환은 오래된 글부터 전송할 수 있게 역순으로 정렬한다.
-    """
-    try:
-        resp = requests.get(LIST_URL, headers=HEADERS, timeout=TIMEOUT)
-        resp.raise_for_status()
-        html = resp.text
-    except Exception:
-        traceback.print_exc()
-        sys.exit("🚫 목록 페이지 요청 실패")
+    # 목록에서 (idx, title, link) 튜플을 모으고, last_id 이전에서 중단
+    html = robust_get_list_html()
+    if not html:
+        print("목록 요청 실패. 다음 주기까지 대기")
+        return []
 
     soup = BeautifulSoup(html, "html.parser")
 
-    # 이 사이트는 같은 페이지에서 보기(view)로 연결되는 형태이며,
-    # href에 undergraduate.php와 idx 파라미터가 포함되어 있음.
+    # undergraduate.php로 가는 링크 중 idx 파라미터가 있는 것만 선택
     anchors = soup.select('a[href*="undergraduate.php"][href*="idx="]')
     if not anchors:
-        # 구조 변화 진단을 위해 디버그 파일 저장
+        # 구조가 바뀐 경우를 대비해 디버그 저장
         with open("infocom_debug.html", "w", encoding="utf-8") as f:
             f.write(html)
-        sys.exit("🚫 공지 링크를 찾지 못했습니다(셀렉터 불일치). infocom_debug.html 확인")
+        print("공지 링크를 찾지 못했습니다. infocom_debug.html 확인")
+        return []
 
     new_posts = []
     for a in anchors:
@@ -79,37 +119,34 @@ def fetch_new_posts(last_id: str | None):
         if not idx:
             continue
         if last_id and idx == last_id:
-            break  # 마지막으로 본 글에 도달 → 그 이전은 이미 전송됨
+            break
 
-        # 제목은 앵커 텍스트 기준으로 추출
-        title = a.get_text(" ", strip=True)
-        if not title:
-            # 부모 요소에 텍스트가 있을 가능성까지 고려
-            title = a.find_parent().get_text(" ", strip=True) if a.find_parent() else "제목 없음"
-
+        title = a.get_text(" ", strip=True) or "제목 없음"
         new_posts.append((idx, title, link))
 
-    # 최신 → 오래된 순으로 수집되었을 수 있으니 전송은 오래된 것부터
-    new_posts.reverse()
+    new_posts.reverse()  # 오래된 것부터 전송
     return new_posts
 
 def send_to_discord(msg: str):
-    """디스코드 웹훅으로 메시지 전송."""
     requests.post(WEBHOOK, json={"content": msg}, timeout=10)
 
 def main():
-    """메인 루틴: 새 글들을 모두 전송하고 마지막 idx 갱신."""
     last_id = read_last_id()
-    posts = fetch_new_posts(last_id)
+    try:
+        posts = fetch_new_posts(last_id)
+    except Exception:
+        traceback.print_exc()
+        print("파싱 중 예외 발생. 이번 주기 스킵")
+        return
 
     if not posts:
-        print("⏸ 새 공지 없음")
+        print("새 공지 없음")
         return
 
     for idx, title, link in posts:
-        send_to_discord(f"🔔 전자정보공학부 새 공지\n{title}\n{link}")
+        send_to_discord(f"전자정보공학부 새 공지\n{title}\n{link}")
         write_last_id(idx)
-        print(f"✅ 전송 완료: {idx} {title}")
+        print(f"전송 완료: {idx} {title}")
 
 if __name__ == "__main__":
     main()
